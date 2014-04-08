@@ -1,4 +1,5 @@
 #!/usr/bin/python
+
 import time, os
 import sys
 import re
@@ -273,9 +274,18 @@ def foreverParse(rewind, printBad, logfilepattern, columns):
                     svctime = int(loginfos[columns.get('timems')]) / 1E3
                 elif 'timeus' in columns:
                     svctime = int(loginfos[columns.get('timeus')]) / 1E6
+            except ValueError, e:
+                try:
+                    if 'times' in columns:
+                        svctime = float(loginfos[columns.get('times')])
+                    elif 'timems' in columns:
+                        svctime = float(loginfos[columns.get('timems')]) / 1E3
+                    elif 'timeus' in columns:
+                        svctime = float(loginfos[columns.get('timeus')]) / 1E6
+                except:
+                    badline = True
             except:
                 badLine = True
-
 
             #First try to identify the application
             vhost = loginfos[columns.get('vhost')].split(':')[0]
