@@ -2,6 +2,7 @@
 
 use strict;
 use Nagios::Plugin;
+use Nagios::Plugin::Threshold;
 use LWP::UserAgent;
 use Scalar::Util qw(looks_like_number);
 
@@ -14,7 +15,7 @@ my $VERSION = '0.10';
 my $np = Nagios::Plugin->new(
   usage => "Usage: %s"
     . '  -H <hostname> -c <threshold> -w <threshold> '
-    . ' [-t <timeout>]'
+    . ' [-t <timeout>] -U|-L'
     . ' -J <JRDS ROOT URL> -p <Probe instance name> -d <dsName>'
     . ' [-i interval] [-f cfFunction]',
   version => $VERSION,
@@ -70,21 +71,52 @@ $np->add_arg(
 );
 
 $np->add_arg(
- spec => 'critical|c=s',
- help => '-c, --critical=value',
+  spec => 'critical|c=s',
+  help => '-c, --critical=value',
   required => 1,
 );
 
+$np->add_arg(
+  spec => 'lowerbound|L+',
+  help => '-L, --lowerbound',
+  required => 0,
+  default => 0,
+);
+
+$np->add_arg(
+  spec => 'upperbound|U+',
+  help => '-U, --upperdound',
+  required => 0,
+  default => 0,
+);
+
 $np->getopts;
+
+my $upperbound = $np->opts->upperbound;
+my $lowerbound = $np->opts->lowerbound;
+
+if( $upperbound + $lowerbound >= 2) {
+    $np->nagios_exit( UNKNOWN, sprintf("Can't give both upper and lower") );
+} elsif ($upperbound + $lowerbound == 0) {
+    if( $np->opts->warning < $np->opts->critical) {
+        $upperbound = 1;
+    } else {
+        $lowerbound = 1;
+    }
+}
+
 
 my $hostname = $np->opts->hostname;
 $hostname =~ s/\.prod//;
 my $resturl = sprintf("%s/values/%s/%s/%s/%s/%s", $np->opts->jrdsurl, $hostname, $np->opts->probeinstance, $np->opts->dsname, $np->opts->interval, $np->opts->cffunc);
 
+print $resturl;
+
 my $req = HTTP::Request->new(GET =>  $resturl);
 my $ua = LWP::UserAgent->new;
 $ua->agent("nagios check");
 $ua->timeout($np->opts->timeout);
+
 
 # Check the outcome of the response
 my $res = $ua->request($req);
@@ -96,7 +128,28 @@ my $value =  $res->content;
 if (! looks_like_number($value)) {
     $np->nagios_exit( CRITICAL, sprintf("invalid value: %s", $value) );
 }
-my $code = $np->check_threshold(check => $value);
+
+my $warn_range;
+my $critical_range;
+
+if($upperbound) {
+    $warn_range = "@" . $np->opts->warning . ":" . $np->opts->critical;
+    $critical_range = "@" . $np->opts->critical . ":";
+} elsif($lowerbound) {
+    $warn_range = "@" . $np->opts->critical . ":" .  $np->opts->warning;
+    $critical_range = "@" . "~:" . $np->opts->critical;
+}
+print  "\n";
+print  $warn_range . "\n";
+print  $critical_range . "\n";
+
+my $thresold = Nagios::Plugin::Threshold->new(
+        warning  => $warn_range,
+        critical => $critical_range,
+    );
+
+my $code = $thresold->get_status($value);
+
 if($code != OK) {
     $main::message = "Threshold check failed";
 }
